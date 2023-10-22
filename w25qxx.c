@@ -1,6 +1,9 @@
 
 #include "w25qxxConf.h"
 #include "w25qxx.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include <__cross_studio_io.h>
 
 #if (_W25QXX_DEBUG == 1)
 #include <stdio.h>
@@ -14,12 +17,16 @@ extern SPI_HandleTypeDef _W25QXX_SPI;
 #define W25qxx_Delay(delay) osDelay(delay)
 #include "cmsis_os.h"
 #else
-#define W25qxx_Delay(delay) HAL_Delay(delay)
+#define W25qxx_Delay(delay) vTaskDelay(delay);//HAL_Delay(delay)
 #endif
 //###################################################################################################################
 uint8_t W25qxx_Spi(uint8_t Data)
 {
 	uint8_t ret;
+
+        _W25QXX_SPI.Instance->CR1 &= ~(SPI_CR1_BR_Msk | SPI_CR1_LSBFIRST_Msk);
+        _W25QXX_SPI.Instance->CR1 |= SPI_BAUDRATEPRESCALER_8;
+
 	HAL_SPI_TransmitReceive(&_W25QXX_SPI, &Data, &ret, 1, 100);
 	return ret;
 }
@@ -128,15 +135,29 @@ void W25qxx_WaitForWriteEnd(void)
 bool W25qxx_Init(void)
 {
 	w25qxx.Lock = 1;
-	while (HAL_GetTick() < 100)
-		W25qxx_Delay(1);
+        vTaskDelay(500);
+	//while (HAL_GetTick() < 100)
+		//W25qxx_Delay(1);
 	HAL_GPIO_WritePin(_W25QXX_CS_GPIO, _W25QXX_CS_PIN, GPIO_PIN_SET);
-	W25qxx_Delay(100);
+	vTaskDelay(100);
 	uint32_t id;
 #if (_W25QXX_DEBUG == 1)
 	printf("w25qxx Init Begin...\r\n");
 #endif
-	id = W25qxx_ReadID();
+        id = W25qxx_ReadID();
+        int startTick = xTaskGetTickCount();
+
+        while((id & 0xFF) == 0xFF) {
+            if ((xTaskGetTickCount() - startTick) > 1000) {
+                return false;
+            }
+            
+            //debug_printf("%d %d\r\n", id, xTaskGetTickCount() - startTick);
+
+            id = W25qxx_ReadID();
+
+            vTaskDelay(100);
+        }
 
 #if (_W25QXX_DEBUG == 1)
 	printf("w25qxx ID:0x%X\r\n", id);
